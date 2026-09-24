@@ -118,10 +118,14 @@ ggplot(results[is.finite(results$mse), ],
   theme_minimal()
 ```
 
-**Replications.** The Monte Carlo standard error falls like $1/\sqrt{R}$. At $R = 1000$ the
-`mc_se` values are under 10% of their MSE for all $n \ge 30$ cells — far smaller than the gaps
-between estimators — so $R = 1000$ is sufficient. Larger $R$ cannot help at $n = 5$, where the
-issue is structural rather than sampling noise.
+**Replications.** Following Robert & Casella (2009, §3.2), a Monte Carlo average converges at
+rate $O(1/\sqrt{R})$ and its error is judged from the estimated standard error $\sqrt{v_R}$,
+with $\pm 2\sqrt{v_R}$ giving an approximate 95% band by the Central Limit Theorem (§4.2 makes
+the same assessment by monitoring the variability of the runs). Applying that criterion, the
+reported `mc_se` (an estimate of $\sqrt{v_R}$ for each MSE) is under 10% of its MSE for every
+$n \ge 30$ cell — far smaller than the gaps between estimators — so $R = 1000$ is sufficient
+there. Larger $R$ cannot help at $n = 5$, where the estimator is undefined rather than merely
+noisy.
 
 **Results.** ML has the lowest MSE in every cell (it is efficient when the model is correct).
 The IQR estimator is about 2.4–3.4$\times$ worse than ML at $n \ge 30$, since it uses only the
@@ -193,5 +197,6 @@ single seasonal difference. Visual argument only — no model fitted.
   OTexts. https://OTexts.com/fpp2
 - Hyndman, R. J., & Fan, Y. (1996). Sample quantiles in statistical packages.
   *The American Statistician, 50*(4), 361–365.
+- Robert, C. P., & Casella, G. (2009). *Introducing Monte Carlo Methods with R.* Springer.
 - Wicklin, R. (2017). Sample quantiles: A comparison of 9 definitions. *SAS Blogs.*
   https://blogs.sas.com/content/iml/2017/05/24/definitions-sample-quantiles.html
