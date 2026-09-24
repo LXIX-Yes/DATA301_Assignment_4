@@ -47,8 +47,8 @@ lambda_iqr <- function(x) {
 
 ## Which definition of the sample quantiles? [10%]
 
-Both Wicklin (2017) and Hyndman & Fan (1996) make the same basic point: "the quartile" is
-not a single thing. A sample quantile has to interpolate between the ordered data points,
+Both Wicklin (2017) and Hyndman & Fan (1996) — the latter also cited in the machine-learning
+lectures — make the same basic point: "the quartile" is not a single thing. A sample quantile has to interpolate between the ordered data points,
 and there are nine common ways of doing that. Hyndman & Fan collect them into one family
 indexed by where the $p$-th quantile sits, $h = (n - a) p + a + b$ for constants that change
 with the definition. The nine split into two groups: types 1–3 are *discontinuous* (they
@@ -75,11 +75,12 @@ choice is deliberate rather than accidental.
 ## A bootstrap bias-corrected IQR estimator [20%]
 
 The IQR estimator is a nonlinear function of two sample quantiles, so it is biased in finite
-samples. The bootstrap gives an estimate of that bias without any analytic work. Write
-$\hat\theta = \hat\lambda_{\text{IQR}}(X)$. Resample the data with replacement, recompute the
-estimator on each resample to get $\hat\theta^{*}_1,\dots,\hat\theta^{*}_B$, and estimate the
-bias by $\widehat{\text{bias}} = \overline{\hat\theta^{*}} - \hat\theta$. The first-order
-bias-corrected estimator subtracts that estimate:
+samples. The bootstrap (Efron, 1979; Davison & Hinkley, 1997) gives an estimate of that bias
+without any analytic work, and it is the resampling idea introduced in the machine-learning
+lectures. Write $\hat\theta = \hat\lambda_{\text{IQR}}(X)$. Resample the data with replacement,
+recompute the estimator on each resample to get $\hat\theta^{*}_1,\dots,\hat\theta^{*}_B$, and
+estimate the bias by $\widehat{\text{bias}} = \overline{\hat\theta^{*}} - \hat\theta$. The
+first-order bias-corrected estimator subtracts that estimate:
 $$
 \hat\lambda_{\text{BC}} \;=\; \hat\theta - \widehat{\text{bias}}
 \;=\; 2\,\hat\theta - \overline{\hat\theta^{*}}.
@@ -105,11 +106,27 @@ c(ML = lambda_ml(x_demo), IQR = lambda_iqr(x_demo), IQR_BC = lambda_iqr_bc(x_dem
 
 ## Monte Carlo comparison [20%]
 
-I compare the three estimators over $\lambda \in \{0.1, 1, 10\}$ and $n \in \{5, 30, 100\}$,
-using the mean squared error as the only metric,
-$\widehat{\text{MSE}} = \frac1R \sum_{r=1}^R (\hat\lambda_r - \lambda)^2$. For each cell I also
-record the Monte Carlo standard error of that MSE and the fraction of replications that
-produced a *finite* estimate — the latter matters at $n = 5$, as we will see.
+I follow the structure set out in the Monte Carlo lecture (Frery, 2026). The metric there is
+the mean squared error, which decomposes as
+$$
+\text{MSE}(\hat\lambda) \;=\; B^2(\hat\lambda) + \operatorname{Var}(\hat\lambda),
+\qquad B(\hat\lambda) = \operatorname{E}(\hat\lambda) - \lambda ,
+$$
+so bias and variance are the two things that make up the score. The lecture's "first mandatory
+approach" is to compute the MSE analytically; only when that fails do we fall back on
+simulation. Here the split is instructive: the ML estimator is analytically tractable
+($n/\sum X_i$ is an inverse-gamma variable with known moments), but the IQR estimator — and
+especially its bootstrap bias-corrected version, which has a random bootstrap step inside it —
+has no closed-form MSE. That intractability is exactly what justifies a Monte Carlo experiment.
+
+Following the lecture's algorithm, each combination of $\lambda$ and $n$ is a *situation*; I
+sweep $\lambda \in \{0.1, 1, 10\}$ and $n \in \{5, 30, 100\}$ (so $3 \times 3 = 9$ situations),
+run $R$ replications per situation, and in each replication draw a fresh sample from
+Exponential$(\lambda)$ and store all three estimates. The MSE estimate for a situation is
+$\widehat{\text{MSE}} = \frac1R \sum_{r=1}^R (\hat\lambda_r - \lambda)^2$; I also record its
+Monte Carlo standard error, the estimated bias and variance (to read off the decomposition
+above), and the fraction of replications that produced a *finite* estimate — the last matters
+at $n = 5$, as we will see.
 
 ```{r ex1-mc}
 lambdas <- c(0.1, 1, 10)
@@ -128,8 +145,12 @@ run_cell <- function(lambda, n, R = R_MC) {
   mse  <- colMeans(sq)                       # Inf if any estimate is Inf
   se   <- apply(sq, 2, sd) / sqrt(R)
   pfin <- colMeans(is.finite(est))           # share of finite estimates
+  # bias and variance from the FINITE estimates, for the MSE = bias^2 + var view
+  bias <- apply(est, 2, function(v) mean(v[is.finite(v)]) - lambda)
+  vare <- apply(est, 2, function(v) var(v[is.finite(v)]))
   data.frame(lambda, n, estimator = names(mse),
              mse = as.numeric(mse), mc_se = as.numeric(se),
+             bias = as.numeric(bias), variance = as.numeric(vare),
              p_finite = as.numeric(pfin), row.names = NULL)
 }
 
@@ -155,6 +176,18 @@ knitr::kable(bc_wide, digits = 3,
              caption = "Fraction of finite IQR-BC estimates (by lambda x n).")
 ```
 
+```{r ex1-biasvar}
+# Bias^2 + variance decomposition for IQR vs IQR-BC, at lambda = 1 (finite cells).
+# Shows WHY the bias correction loses on MSE: it trims bias but adds variance.
+dec <- results[results$lambda == 1 & results$n %in% c(30, 100) &
+                 results$estimator %in% c("IQR", "IQR_BC"),
+               c("n", "estimator", "bias", "variance", "mse")]
+dec$bias_sq <- dec$bias^2
+knitr::kable(dec[, c("n", "estimator", "bias", "bias_sq", "variance", "mse")],
+             digits = 4, row.names = FALSE,
+             caption = "Bias / variance decomposition at lambda = 1 (bias-squared + variance = MSE).")
+```
+
 ```{r ex1-plot, fig.cap="MSE against sample size, faceted by lambda (log MSE). Non-finite points (IQR-BC at n=5) are omitted.", fig.height=3.4}
 plot_df <- results[is.finite(results$mse), ]
 ggplot(plot_df, aes(factor(n), mse, colour = estimator, group = estimator)) +
@@ -165,13 +198,17 @@ ggplot(plot_df, aes(factor(n), mse, colour = estimator, group = estimator)) +
   theme_minimal()
 ```
 
-**Number of replications.** The `mc_se` column (computed but not printed to save space) is
-around 5–9% of the corresponding MSE for every $n = 30$ and $n = 100$ cell — much smaller
-than the gaps between estimators, which start at about 2.5$\times$ and run far higher. So
-$R = 1000$ is already enough to separate the estimators cleanly at those sample sizes, and
-pushing $R$ higher would only shrink error bars that are already well inside the differences
-I am interpreting. The one place $R$ cannot help is $n = 5$: there the problem is not sampling
-noise but that the estimator is undefined (below), and no number of replications fixes that.
+**Number of replications.** The lecture notes that a Monte Carlo estimate of a mean has
+imprecision proportional to $\operatorname{Var}/R$, so its standard error falls like
+$1/\sqrt{R}$; that is the lever for choosing $R$. Here I use a common $R = 1000$ across
+situations rather than a situation-specific $R_n$, and check it after the fact: the `mc_se`
+column (computed but not printed to save space) is around 5–9% of the corresponding MSE for
+every $n = 30$ and $n = 100$ cell — much smaller than the gaps between estimators, which start
+at about 2.5$\times$ and run far higher. So $R = 1000$ already separates the estimators cleanly
+at those sample sizes, and pushing $R$ higher would only shrink error bars that are already
+well inside the differences I am interpreting. The one place $R$ cannot help is $n = 5$: there
+the problem is not sampling noise but that the estimator is undefined (below), and no number of
+replications fixes that — the fix would be a different estimator, not a larger $R$.
 
 **What the results say.**
 
@@ -182,10 +219,11 @@ noise but that the estimator is undefined (below), and no number of replications
   2.5–3.4$\times$ the ML MSE. That gap reflects its lower asymptotic efficiency — it throws
   away most of the sample and keeps only the quartile spacing.
 * **The bias correction makes MSE worse, not better.** For $n = 30$ and $n = 100$ the
-  bias-corrected estimator has MSE about 5–17% *above* plain IQR. Bias correction removes
-  bias but inflates variance, and for this estimator the added variance outweighs the bias it
-  removes, so on the MSE metric it loses. This is the expected bias–variance trade-off, and it
-  is a useful reminder that a bias correction is not automatically an improvement.
+  bias-corrected estimator has MSE about 5–17% *above* plain IQR. The bias/variance table makes
+  the reason concrete: reading the $\text{MSE} = B^2 + \operatorname{Var}$ decomposition, the
+  correction does shrink the bias term, but it adds more variance than the bias it removes, so
+  the sum goes up. This is the bias–variance trade-off from the Monte Carlo lecture, and a
+  useful reminder that a bias correction is not automatically an improvement on MSE.
 * **At $n = 5$ the IQR estimators break down.** The plain IQR estimate is finite but wildly
   variable — its MSE runs from roughly 20$\times$ up to 260$\times$ the ML MSE across these
   three cells, and that multiple is itself unstable from run to run. The bias-corrected
@@ -236,10 +274,12 @@ autoplot(beer) + labs(x = "Year", y = "Megalitres") + theme_minimal()
 line through the series falls by roughly 1.3 megalitres per year over 1992–2010. Production is
 broadly flat with a gentle decline, not a clear rise.
 
-**Seasonality (Q3).** Yes, there is clear seasonality with a period of four quarters. The
-quarterly means are Q1 $\approx 429$, Q2 $\approx 394$, Q3 $\approx 411$, Q4 $\approx 502$:
-Q4 stands well above the rest and Q2 is the lowest. That fits the southern-hemisphere calendar
-— the Q4 spike is the run-up to the Christmas/summer period.
+**Seasonality (Q3).** Yes, there is clear seasonality. In the lecture's terms this is
+*periodic* behaviour — it repeats identically on a fixed four-quarter period — rather than the
+looser *cyclic* behaviour whose length wanders, so it is genuine seasonality tied to the
+calendar. The quarterly means are Q1 $\approx 429$, Q2 $\approx 394$, Q3 $\approx 411$,
+Q4 $\approx 502$: Q4 stands well above the rest and Q2 is the lowest. That fits the
+southern-hemisphere calendar — the Q4 spike is the run-up to the Christmas/summer period.
 
 **Variance (Q4).** The size of the seasonal swing looks fairly constant in absolute terms
 across the whole window — the peaks and troughs don't visibly fan out or shrink over time. The
@@ -286,16 +326,32 @@ over time, mirroring the mild overall decline, but the *ranking* of the quarters
 
 ## Would I detrend or transform before modelling?
 
-**Q8.** On the visual evidence I would do very little. The seasonal amplitude is stable across
-the plot, so I would **not** apply a variance-stabilising transformation despite the automatic
-Box-Cox value sitting at its boundary — that boundary result isn't backed up by any fanning
-in the picture. The trend is weak, so I wouldn't hard-detrend either; I'd let a seasonal model
-absorb the gentle drift rather than differencing it away up front. In short: the series is
-close to "trend-stationary with stable seasonality", and the plots argue for leaving it
-essentially as-is before modelling. (As instructed, I fit no model here.)
+**Q8.** The lecture frames this as a question about **stationarity**: classical time-series
+methods assume, or work best on, a weakly stationary series — one whose mean, variance and
+autocorrelation stay constant over time — and the point of transforming or differencing is to
+get closer to that. Reading the plots against that standard:
+
+* *Variance.* The seasonal amplitude is stable across the window, so the variance condition is
+  roughly met already. I would **not** apply a variance-stabilising transformation, despite the
+  automatic Box-Cox value sitting at its boundary — that boundary result isn't backed by any
+  fanning in the picture.
+* *Mean.* The only thing breaking stationarity is the seasonality plus a weak downward drift,
+  both of which move the mean. Rather than log-transforming or hard-detrending up front, the
+  natural route to stationarity here is a **seasonal difference** (lag 4), which would remove
+  the periodic pattern and the mild drift together and leave something close to white noise.
+
+So my answer is: no transformation, and no separate detrending — if anything were needed before
+modelling it would be a single seasonal difference to reach stationarity. (As instructed, I fit
+no model here; this is a visual argument only.)
 
 # References
 
+- Davison, A. C., & Hinkley, D. V. (1997). *Bootstrap Methods and their Application.*
+  Cambridge University Press.
+- Efron, B. (1979). Bootstrap methods: Another look at the jackknife.
+  *The Annals of Statistics, 7*(1), 1–26.
+- Frery, A. C. (2026). *The Monte Carlo Method* [DATA301 lecture]. Victoria University of
+  Wellington.
 - Hyndman, R. J., & Athanasopoulos, G. (2018). *Forecasting: Principles and Practice.*
   OTexts. https://OTexts.com/fpp2
 - Hyndman, R. J., & Fan, Y. (1996). Sample quantiles in statistical packages.
