@@ -21,29 +21,26 @@ library(ggplot2)
 
 # Exercise 1 - Estimators for the Exponential rate lambda
 
-X_1, ..., X_n are independent and identically distributed as Exponential(lambda),
-where lambda is greater than 0 and equals the reciprocal of the mean. I compare the
-maximum likelihood estimator, the inter-quartile-range (IQR) analogy estimator, and a
-bootstrap bias-corrected IQR estimator.
+X_1, ..., X_n are independent and identically distributed as Exponential(lambda), where
+lambda is greater than 0 and equals the reciprocal of the mean. I compare three estimators:
+the maximum likelihood estimator, the inter-quartile-range (IQR) analogy estimator
+$\hat\lambda_{IQR} = \ln(3)/(Q_3 - Q_1)$, and a bootstrap bias-corrected IQR estimator.
 
 ```{r ex1-estimators}
-# Maximum likelihood: lambda_ML = 1 / mean(X)
 lambda_ml <- function(x) 1 / mean(x)
 
-# Fast type-7 quantile (identical to quantile(x, p, type = 7)), for speed.
-q7 <- function(xs, p) {              # xs already sorted
+q7 <- function(xs, p) {
   n <- length(xs); h <- 1 + (n - 1) * p; lo <- floor(h); fr <- h - lo
   if (lo >= n) xs[n] else xs[lo] + fr * (xs[lo + 1] - xs[lo])
 }
 
-# IQR estimator: lambda_IQR = ln(3) / (Q3 - Q1), since Q3 - Q1 = ln(3)/lambda.
 lambda_iqr <- function(x) { xs <- sort(x); log(3) / (q7(xs, 0.75) - q7(xs, 0.25)) }
 ```
 
-## Which definition of the sample quantiles? [10%]
+## [10%] Read and summarise Wicklin (2017); which type of order statistics would you use and why, and which is the default in your R/Python?
 
-Wicklin (2017) reviews nine definitions of the sample quantile: three discrete (which round
-to order statistics) and six continuous (which interpolate linearly between them). They differ
+Wicklin (2017) reviews nine definitions of the sample quantile: three discrete (which round to
+order statistics) and six continuous (which interpolate linearly between them). They differ
 mainly for small samples (n of 10 or fewer) and in the tails, and become indistinguishable by
 about n = 100. Defaults vary by software (SAS uses type 2; R uses type 7). Wicklin does not
 recommend a single type, but points to Hyndman and Fan (1996) for anyone who wants an unbiased
@@ -54,17 +51,15 @@ I use type 7, which is R's default (NumPy's "linear" method is the same). For co
 Exponential data with no ties the difference between the types is of order 1/n and cannot
 affect the comparison of estimators below, so the default is fine.
 
-## A bootstrap bias-corrected IQR estimator [20%]
+## [20%] Derive and implement a first-order bootstrap bias-corrected estimator based on IQR (B = 200)
 
 The IQR estimator is a nonlinear function of two quantiles, so it is biased in finite samples.
-Write theta_hat for lambda_IQR(X). The bootstrap (Efron, 1979) estimates the bias as
-(mean of theta_star) minus theta_hat, where theta_star_1, ..., theta_star_B are the estimator
-recomputed on resamples of the data. The first-order bias-corrected estimator subtracts that
-estimate of the bias:
+Write theta-hat for the IQR estimate on the data. The bootstrap (Efron, 1979) resamples the
+data with replacement, recomputes the estimator to get theta-star_1, ..., theta-star_B, and
+estimates the bias as their mean minus theta-hat. The first-order bias-corrected estimator
+subtracts that estimated bias:
 
-    lambda_BC = theta_hat - (mean(theta_star) - theta_hat) = 2*theta_hat - mean(theta_star),
-
-with B = 200 bootstrap resamples.
+$$\hat\lambda_{BC} \;=\; 2\hat\theta - \frac{1}{B}\sum_{b=1}^{B}\hat\theta^{*}_b, \qquad B = 200.$$
 
 ```{r ex1-bootstrap}
 lambda_iqr_bc <- function(x, B = 200) {
@@ -75,12 +70,12 @@ lambda_iqr_bc <- function(x, B = 200) {
 }
 ```
 
-## Monte Carlo comparison [20%]
+## [20%] Make a Monte Carlo experiment comparing the three estimators (MSE as the sole metric); report results and justify the number of replications
 
 Over lambda in {0.1, 1, 10} and n in {5, 30, 100}, with R replications per cell, I draw a fresh
-sample each replication and record the mean squared error (the sole metric). The MSE estimate
-for a cell is the average over the R replications of (lambda_hat - lambda) squared. I also
-record its Monte Carlo standard error.
+sample each replication and record the mean squared error (the sole metric),
+$\widehat{MSE} = \frac{1}{R}\sum_{r=1}^{R}(\hat\lambda_r - \lambda)^2$, together with its Monte
+Carlo standard error.
 
 ```{r ex1-mc}
 lambdas <- c(0.1, 1, 10); ns <- c(5, 30, 100)
@@ -121,14 +116,14 @@ ggplot(results[is.finite(results$mse), ],
 ```
 
 Replications. Following Robert and Casella (2009, section 3.2), a Monte Carlo average converges
-at a rate of order 1 over the square root of R, and its error is judged from the estimated
-standard error: the estimate plus or minus two standard errors gives an approximate 95 percent
-band by the Central Limit Theorem (section 4.2 makes the same assessment by monitoring the
-variability of the runs). Applying that criterion, the reported mc_se is under 10 percent of
-its MSE for every cell with n of 30 or more, which is far smaller than the gaps between the
-estimators, so R = 1000 is enough there. A larger R cannot help at n = 5, where the estimator
-is undefined rather than merely noisy. This value of 1000 also matches the working default
-(Nsim = 10^3) used throughout Robert and Casella.
+at a rate of order $1/\sqrt{R}$, and its error is judged from the estimated standard error: the
+estimate plus or minus two standard errors gives an approximate 95 percent band by the Central
+Limit Theorem (section 4.2 makes the same assessment by monitoring the variability of the
+runs). Applying that criterion, the reported mc_se is under 10 percent of its MSE for every
+cell with n of 30 or more, which is far smaller than the gaps between the estimators, so
+R = 1000 is enough there. A larger R cannot help at n = 5, where the estimator is undefined
+rather than merely noisy. This value of 1000 also matches the working default used throughout
+Robert and Casella.
 
 Results. ML has the lowest MSE in every cell, which is expected because it is efficient when
 the model is correct. The IQR estimator is about 2.4 to 3.4 times worse than ML at n of 30 or
@@ -148,46 +143,62 @@ Australian beer production in megalitres; I use the span from 1992 onward.
 beer <- window(ausbeer, start = 1992)
 ```
 
-## Frequency
+```{r ex2-plot, fig.cap="Quarterly Australian beer production, 1992 onward.", fig.height=3.2}
+autoplot(beer) + labs(x = "Year", y = "Megalitres") + theme_minimal()
+```
+
+## 1. What is the frequency of the series? How can you determine this from the data and/or the time-series plot?
 
 ```{r ex2-freq}
 frequency(beer)
 ```
 
-The frequency is 4 (quarterly); the plot also repeats every four observations.
+The frequency is 4 (quarterly). This is reported by the series object, and the time plot above
+also repeats every four observations (one cycle per year).
 
-## Behaviour, trend, seasonality, variance, outliers
+## 2. Describe the overall behaviour of the series. Is there evidence of a long-term trend?
 
-```{r ex2-plot, fig.cap="Quarterly Australian beer production, 1992 onward.", fig.height=3.2}
-autoplot(beer) + labs(x = "Year", y = "Megalitres") + theme_minimal()
-```
+The series is broadly flat with a slight downward drift of about 1.3 megalitres per year. There
+is no strong long-term trend, just a gentle decline over the period.
 
-- Trend: no strong trend, just a slight downward drift of about 1.3 megalitres per year.
-- Seasonality: clear and periodic (a fixed four-quarter cycle, not merely cyclic). The quarter
-  means are Q1 429, Q2 394, Q3 411, Q4 502, so Q4 is highest and Q2 is lowest.
-- Variance: the seasonal amplitude is stable over time, so no transformation is needed.
-- Unusual points: 2010 Q2 (374 megalitres) is the lowest and 1992 Q4 (532 megalitres) the
-  highest; both are consistent with the seasonal pattern rather than being data errors.
+## 3. Is there evidence of seasonality? If so, describe the seasonal pattern.
 
-## Seasonal plot
+Yes. The seasonality is periodic (a fixed four-quarter cycle, not merely cyclic). The quarter
+means are Q1 429, Q2 394, Q3 411, Q4 502, so Q4 is the highest and Q2 the lowest, matching the
+southern-hemisphere Christmas and summer period.
+
+## 4. Does the variability appear constant over time? Explain what you see in the plot and whether a transformation might be appropriate.
+
+The seasonal amplitude looks stable across the whole window; the peaks and troughs do not fan
+out or shrink over time. Because the variability is roughly constant, a variance-stabilising
+transformation is not needed.
+
+## 5. Are there any observations that you would regard as unusual? Identify them and explain why they attract attention.
+
+The lowest point is 2010 Q2 (374 megalitres) and the highest is 1992 Q4 (532 megalitres). Both
+stand out as the extremes of the range, but they are consistent with the seasonal pattern (Q2
+low, Q4 high) rather than being data errors.
+
+## 6. Plot the series by season. What does this reveal that is less obvious in the ordinary time-series plot?
 
 ```{r ex2-season, fig.cap="Seasonal plot.", fig.height=3.2}
 ggseasonplot(beer, year.labels = TRUE) + labs(y = "Megalitres") + theme_minimal()
 ```
 
 Every year follows the same profile (a peak in Q4 and a trough in Q2) with roughly parallel
-lines, so the seasonal shape is stable and the years differ mainly in their overall level.
+lines. This makes it clear that the seasonal shape is stable and that years differ mainly in
+their overall level, which is hard to see in the ordinary plot.
 
-## Seasonal subseries plot
+## 7. Plot the seasonal subseries. Which quarters have the highest and lowest typical values? Is the seasonal pattern stable over time?
 
 ```{r ex2-subseries, fig.cap="Seasonal subseries plot.", fig.height=3.2}
 ggsubseriesplot(beer) + labs(y = "Megalitres") + theme_minimal()
 ```
 
-Q4 is the highest quarter and Q2 the lowest (the blue quarter means). Each quarter drifts down
-slightly over time, but the ranking never changes, so the seasonal pattern is stable.
+Q4 has the highest typical value and Q2 the lowest (the blue quarter means). Each quarter drifts
+down slightly over time, but the ranking never changes, so the seasonal pattern is stable.
 
-## Detrend or transform before modelling?
+## 8. Would you detrend or transform the series before modelling it? Give a visual argument. Do not fit a model.
 
 No. The variance is stable (so no transformation) and the trend is weak; the only substantial
 departure from stationarity is the seasonality, so if anything were done before modelling it
