@@ -1,5 +1,5 @@
 ---
-title: "DATA301/DATA471 — Assignment IV"
+title: "DATA301/DATA471 - Assignment IV"
 author: "Luca Panettieri"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
@@ -19,11 +19,12 @@ suppressMessages(library(fpp2))
 library(ggplot2)
 ```
 
-# Exercise 1 — Estimators for the Exponential rate $\lambda$
+# Exercise 1 - Estimators for the Exponential rate lambda
 
-$X_1,\dots,X_n \sim \text{Exponential}(\lambda)$ i.i.d., with $\lambda>0$ the reciprocal of the
-mean. I compare the maximum likelihood estimator, the inter-quartile-range (IQR) analogy
-estimator, and a bootstrap bias-corrected IQR estimator.
+X_1, ..., X_n are independent and identically distributed as Exponential(lambda),
+where lambda is greater than 0 and equals the reciprocal of the mean. I compare the
+maximum likelihood estimator, the inter-quartile-range (IQR) analogy estimator, and a
+bootstrap bias-corrected IQR estimator.
 
 ```{r ex1-estimators}
 # Maximum likelihood: lambda_ML = 1 / mean(X)
@@ -41,28 +42,29 @@ lambda_iqr <- function(x) { xs <- sort(x); log(3) / (q7(xs, 0.75) - q7(xs, 0.25)
 
 ## Which definition of the sample quantiles? [10%]
 
-Wicklin (2017) reviews nine definitions of the sample quantile: three *discrete* (rounding to
-order statistics) and six *continuous* (linear interpolation between them). They differ mainly
-for small samples ($n \le 10$) and in the tails, and become indistinguishable by $n \approx
-100$. Defaults vary by software (SAS uses type 2; R uses type 7); Wicklin does not prescribe a
-type, but points to Hyndman & Fan (1996) for anyone wanting an unbiased or distribution-free
-choice. Hyndman & Fan recommend **type 8**, which is approximately median-unbiased for any
-distribution.
+Wicklin (2017) reviews nine definitions of the sample quantile: three discrete (which round
+to order statistics) and six continuous (which interpolate linearly between them). They differ
+mainly for small samples (n of 10 or fewer) and in the tails, and become indistinguishable by
+about n = 100. Defaults vary by software (SAS uses type 2; R uses type 7). Wicklin does not
+recommend a single type, but points to Hyndman and Fan (1996) for anyone who wants an unbiased
+or distribution-free choice. Hyndman and Fan recommend type 8, which is approximately
+median-unbiased for any distribution.
 
-I use **type 7** — R's default (NumPy's `"linear"` method is equivalent). For continuous
-Exponential data with no ties the difference between types is $O(1/n)$ and cannot affect the
-comparison of estimators below, so the default is adequate.
+I use type 7, which is R's default (NumPy's "linear" method is the same). For continuous
+Exponential data with no ties the difference between the types is of order 1/n and cannot
+affect the comparison of estimators below, so the default is fine.
 
 ## A bootstrap bias-corrected IQR estimator [20%]
 
-$\hat\lambda_{\text{IQR}}$ is a nonlinear function of two quantiles, so it is biased in finite
-samples. With $\hat\theta = \hat\lambda_{\text{IQR}}(X)$, the bootstrap (Efron, 1979) estimates
-the bias as $\overline{\hat\theta^{*}} - \hat\theta$ from resampled estimates
-$\hat\theta^{*}_1,\dots,\hat\theta^{*}_B$, giving the first-order corrected estimator
-$$
-\hat\lambda_{\text{BC}} = \hat\theta - (\overline{\hat\theta^{*}} - \hat\theta)
-= 2\hat\theta - \overline{\hat\theta^{*}}, \qquad B = 200.
-$$
+The IQR estimator is a nonlinear function of two quantiles, so it is biased in finite samples.
+Write theta_hat for lambda_IQR(X). The bootstrap (Efron, 1979) estimates the bias as
+(mean of theta_star) minus theta_hat, where theta_star_1, ..., theta_star_B are the estimator
+recomputed on resamples of the data. The first-order bias-corrected estimator subtracts that
+estimate of the bias:
+
+    lambda_BC = theta_hat - (mean(theta_star) - theta_hat) = 2*theta_hat - mean(theta_star),
+
+with B = 200 bootstrap resamples.
 
 ```{r ex1-bootstrap}
 lambda_iqr_bc <- function(x, B = 200) {
@@ -75,10 +77,10 @@ lambda_iqr_bc <- function(x, B = 200) {
 
 ## Monte Carlo comparison [20%]
 
-Over $\lambda \in \{0.1, 1, 10\}$ and $n \in \{5, 30, 100\}$, with $R$ replications per cell, I
-draw a fresh sample each replication and record the mean squared error (the sole metric),
-$\widehat{\text{MSE}} = \frac1R \sum_{r=1}^R (\hat\lambda_r - \lambda)^2$, plus its Monte Carlo
-standard error.
+Over lambda in {0.1, 1, 10} and n in {5, 30, 100}, with R replications per cell, I draw a fresh
+sample each replication and record the mean squared error (the sole metric). The MSE estimate
+for a cell is the average over the R replications of (lambda_hat - lambda) squared. I also
+record its Monte Carlo standard error.
 
 ```{r ex1-mc}
 lambdas <- c(0.1, 1, 10); ns <- c(5, 30, 100)
@@ -118,27 +120,29 @@ ggplot(results[is.finite(results$mse), ],
   theme_minimal()
 ```
 
-**Replications.** Following Robert & Casella (2009, §3.2), a Monte Carlo average converges at
-rate $O(1/\sqrt{R})$ and its error is judged from the estimated standard error $\sqrt{v_R}$,
-with $\pm 2\sqrt{v_R}$ giving an approximate 95% band by the Central Limit Theorem (§4.2 makes
-the same assessment by monitoring the variability of the runs). Applying that criterion, the
-reported `mc_se` (an estimate of $\sqrt{v_R}$ for each MSE) is under 10% of its MSE for every
-$n \ge 30$ cell — far smaller than the gaps between estimators — so $R = 1000$ is sufficient
-there. Larger $R$ cannot help at $n = 5$, where the estimator is undefined rather than merely
-noisy.
+Replications. Following Robert and Casella (2009, section 3.2), a Monte Carlo average converges
+at a rate of order 1 over the square root of R, and its error is judged from the estimated
+standard error: the estimate plus or minus two standard errors gives an approximate 95 percent
+band by the Central Limit Theorem (section 4.2 makes the same assessment by monitoring the
+variability of the runs). Applying that criterion, the reported mc_se is under 10 percent of
+its MSE for every cell with n of 30 or more, which is far smaller than the gaps between the
+estimators, so R = 1000 is enough there. A larger R cannot help at n = 5, where the estimator
+is undefined rather than merely noisy. This value of 1000 also matches the working default
+(Nsim = 10^3) used throughout Robert and Casella.
 
-**Results.** ML has the lowest MSE in every cell (it is efficient when the model is correct).
-The IQR estimator is about 2.4–3.4$\times$ worse than ML at $n \ge 30$, since it uses only the
-quartiles. The bias correction slightly *increases* MSE (it removes bias but adds more
-variance). At $n = 5$ the IQR estimators fail: IQR is extremely variable, and IQR-BC is
-infinite because bootstrap resamples of five values often give $Q_3 = Q_1$ (zero denominator).
-MSE scales like $\lambda^2$ and falls like $1/n$, as expected.
+Results. ML has the lowest MSE in every cell, which is expected because it is efficient when
+the model is correct. The IQR estimator is about 2.4 to 3.4 times worse than ML at n of 30 or
+more, since it uses only the quartiles. The bias correction slightly increases the MSE (it
+removes bias but adds more variance), and this holds in every finite cell. At n = 5 the IQR
+estimators fail: IQR is extremely variable, and IQR-BC is infinite, because bootstrap resamples
+of five values often give Q3 equal to Q1 (a zero denominator). The MSE scales like lambda
+squared across the columns and falls like 1 over n down the rows, as expected.
 
-# Exercise 2 — Time-series analysis of `ausbeer` [50%]
+# Exercise 2 - Time-series analysis of ausbeer [50%]
 
-Approached as exploratory data analysis (per the course announcement): the plots below extract
-the information in the data; no model is fitted. `ausbeer` is quarterly Australian beer
-production (megalitres); I use the span from 1992 onward.
+This is approached as exploratory data analysis (per the course announcement): the plots below
+extract the information in the data, and no model is fitted. The ausbeer series is quarterly
+Australian beer production in megalitres; I use the span from 1992 onward.
 
 ```{r ex2-window}
 beer <- window(ausbeer, start = 1992)
@@ -150,7 +154,7 @@ beer <- window(ausbeer, start = 1992)
 frequency(beer)
 ```
 
-Frequency 4 (quarterly); the plot also repeats every four observations.
+The frequency is 4 (quarterly); the plot also repeats every four observations.
 
 ## Behaviour, trend, seasonality, variance, outliers
 
@@ -158,12 +162,12 @@ Frequency 4 (quarterly); the plot also repeats every four observations.
 autoplot(beer) + labs(x = "Year", y = "Megalitres") + theme_minimal()
 ```
 
-- **Trend:** no strong trend — a slight downward drift (about $-1.3$ ML/year).
-- **Seasonality:** clear and *periodic* (fixed four-quarter cycle, not merely cyclic). Quarter
-  means: Q1 429, Q2 394, Q3 411, Q4 502 — Q4 highest, Q2 lowest.
-- **Variance:** the seasonal amplitude is stable over time, so no transformation is needed.
-- **Unusual points:** 2010 Q2 (374 ML) is the lowest and 1992 Q4 (532 ML) the highest; both
-  are consistent with the seasonal pattern, not data errors.
+- Trend: no strong trend, just a slight downward drift of about 1.3 megalitres per year.
+- Seasonality: clear and periodic (a fixed four-quarter cycle, not merely cyclic). The quarter
+  means are Q1 429, Q2 394, Q3 411, Q4 502, so Q4 is highest and Q2 is lowest.
+- Variance: the seasonal amplitude is stable over time, so no transformation is needed.
+- Unusual points: 2010 Q2 (374 megalitres) is the lowest and 1992 Q4 (532 megalitres) the
+  highest; both are consistent with the seasonal pattern rather than being data errors.
 
 ## Seasonal plot
 
@@ -171,8 +175,8 @@ autoplot(beer) + labs(x = "Year", y = "Megalitres") + theme_minimal()
 ggseasonplot(beer, year.labels = TRUE) + labs(y = "Megalitres") + theme_minimal()
 ```
 
-Every year follows the same profile (peak in Q4, trough in Q2) with roughly parallel lines, so
-the seasonal shape is stable and years differ mainly in level.
+Every year follows the same profile (a peak in Q4 and a trough in Q2) with roughly parallel
+lines, so the seasonal shape is stable and the years differ mainly in their overall level.
 
 ## Seasonal subseries plot
 
@@ -180,23 +184,23 @@ the seasonal shape is stable and years differ mainly in level.
 ggsubseriesplot(beer) + labs(y = "Megalitres") + theme_minimal()
 ```
 
-Q4 is highest and Q2 lowest (blue means); each quarter drifts down slightly over time but the
-ranking never changes, so the seasonal pattern is stable.
+Q4 is the highest quarter and Q2 the lowest (the blue quarter means). Each quarter drifts down
+slightly over time, but the ranking never changes, so the seasonal pattern is stable.
 
 ## Detrend or transform before modelling?
 
-No. The variance is stable (no transformation) and the trend is weak; the only substantial
-non-stationarity is the seasonality, so if anything were done before modelling it would be a
-single seasonal difference. Visual argument only — no model fitted.
+No. The variance is stable (so no transformation) and the trend is weak; the only substantial
+departure from stationarity is the seasonality, so if anything were done before modelling it
+would be a single seasonal difference. This is a visual argument only, with no model fitted.
 
 # References
 
-- Efron, B. (1979). Bootstrap methods: Another look at the jackknife. *The Annals of
-  Statistics, 7*(1), 1–26.
-- Hyndman, R. J., & Athanasopoulos, G. (2018). *Forecasting: Principles and Practice.*
+- Efron, B. (1979). Bootstrap methods: Another look at the jackknife. The Annals of
+  Statistics, 7(1), 1-26.
+- Hyndman, R. J., and Athanasopoulos, G. (2018). Forecasting: Principles and Practice.
   OTexts. https://OTexts.com/fpp2
-- Hyndman, R. J., & Fan, Y. (1996). Sample quantiles in statistical packages.
-  *The American Statistician, 50*(4), 361–365.
-- Robert, C. P., & Casella, G. (2009). *Introducing Monte Carlo Methods with R.* Springer.
-- Wicklin, R. (2017). Sample quantiles: A comparison of 9 definitions. *SAS Blogs.*
+- Hyndman, R. J., and Fan, Y. (1996). Sample quantiles in statistical packages.
+  The American Statistician, 50(4), 361-365.
+- Robert, C. P., and Casella, G. (2009). Introducing Monte Carlo Methods with R. Springer.
+- Wicklin, R. (2017). Sample quantiles: A comparison of 9 definitions. SAS Blogs.
   https://blogs.sas.com/content/iml/2017/05/24/definitions-sample-quantiles.html
