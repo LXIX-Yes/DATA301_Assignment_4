@@ -11,287 +11,295 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-  echo = TRUE,
-  message = FALSE,
-  warning = FALSE,
-  fig.align = "center",
-  fig.width = 7,
-  fig.height = 4.5
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 7, fig.height = 4.2
 )
-
-# Reproducibility
-set.seed(301)
-
-# Packages
-# install.packages("fpp2")  # run once if not installed
-library(fpp2)      # ausbeer data + autoplot / ggseasonplot / ggsubseriesplot
+set.seed(301)                      # reproducibility
+suppressMessages(library(fpp2))    # ausbeer + autoplot / ggseasonplot / ggsubseriesplot
 library(ggplot2)
 ```
 
 # Exercise 1 — Estimators for the Exponential rate $\lambda$
 
-We model the time between successive customer arrivals as i.i.d.
-$X_1,\dots,X_n \sim \text{Exponential}(\lambda)$, where $\lambda>0$ is the
-reciprocal of the mean. We compare three estimators of $\lambda$:
-
-- the **maximum likelihood** estimator,
-- an **analogy** estimator based on the inter-quartile range (IQR), and
-- a **bootstrap bias-corrected** version of the IQR estimator.
+I model the time between arrivals as i.i.d. $X_1,\dots,X_n \sim \text{Exponential}(\lambda)$,
+with $\lambda>0$ the reciprocal of the mean. I compare three estimators of $\lambda$: the
+maximum likelihood estimator, an analogy estimator built from the inter-quartile range
+(IQR), and a bootstrap bias-corrected version of that IQR estimator.
 
 ```{r ex1-estimators}
-# Maximum likelihood estimator: lambda_ML = 1 / mean(X) = n / sum(X)
-lambda_ml <- function(x) {
-  1 / mean(x)
+# Maximum likelihood: lambda_ML = 1 / mean(X)  (= n / sum(X))
+lambda_ml <- function(x) 1 / mean(x)
+
+# Fast type-7 quantile (identical to quantile(x, p, type = 7)), used so the
+# Monte Carlo below runs in reasonable time.
+q7 <- function(xs, p) {              # xs must already be sorted
+  n <- length(xs); h <- 1 + (n - 1) * p; lo <- floor(h); fr <- h - lo
+  if (lo >= n) xs[n] else xs[lo] + fr * (xs[lo + 1] - xs[lo])
 }
 
-# IQR / analogy estimator: lambda_IQR = ln(3) / (Q3(X) - Q1(X))
-# For Exp(lambda): Q3 - Q1 = ln(3)/lambda, hence the estimator below.
-# `qtype` lets us switch quantile definition (see the [10%] discussion).
-lambda_iqr <- function(x, qtype = 7) {
-  q <- quantile(x, probs = c(0.25, 0.75), type = qtype, names = FALSE)
-  log(3) / (q[2] - q[1])
+# IQR / analogy estimator: lambda_IQR = ln(3) / (Q3 - Q1).
+# For Exp(lambda), Q3 - Q1 = ln(3)/lambda, which is what makes this consistent.
+lambda_iqr <- function(x) {
+  xs <- sort(x)
+  log(3) / (q7(xs, 0.75) - q7(xs, 0.25))
 }
 ```
 
-## Order statistics: which quantile definition? [10%]
+## Which definition of the sample quantiles? [10%]
 
-<!--
-TODO (write-up, ~1/2 page):
-- Summarise Wicklin (2017): there are 9 sample-quantile "types" (definitions),
-  differing in how they interpolate between order statistics.
-- Note Hyndman & Fan (1996) framework and their recommendation.
-- State the DEFAULT: R's quantile() uses type 7; NumPy's default is also
-  equivalent to type 7.
-- Say which type you use and WHY (e.g. type 8: approximately median-unbiased and
-  distribution-independent, as recommended by Hyndman & Fan).
-- Whatever you choose, set QTYPE below so the whole assignment stays consistent.
--->
+Both Wicklin (2017) and Hyndman & Fan (1996) make the same basic point: "the quartile" is
+not a single thing. A sample quantile has to interpolate between the ordered data points,
+and there are nine common ways of doing that. Hyndman & Fan collect them into one family
+indexed by where the $p$-th quantile sits, $h = (n - a) p + a + b$ for constants that change
+with the definition. The nine split into two groups: types 1–3 are *discontinuous* (they
+jump from one order statistic to the next, essentially reading off the empirical CDF), while
+types 4–9 are *continuous*, drawing a piecewise-linear line through the order statistics and
+interpolating along it. Wicklin's blog walks through the same nine definitions from the SAS
+side and shows, with pictures, that they only really disagree in small samples and out in the
+tails; for large $n$ they all converge to the same number.
 
-```{r ex1-qtype}
-# Quantile definition used throughout this assignment.
-# Change to 8 if you argue for the Hyndman & Fan recommendation.
-QTYPE <- 7
+Hyndman & Fan recommend **type 8**, because its quantile estimates are approximately
+median-unbiased whatever the underlying distribution is, so it doesn't bake in an assumption
+about the data. The practical default is different: **R's `quantile()` uses type 7**, and
+NumPy's default (`method = "linear"`) is the same type 7. Type 7 is the piecewise-linear
+interpolation of the empirical CDF and is exactly median-unbiased only for the uniform.
 
-# Show the default your R version reports (context for the discussion):
-# ?quantile documents type = 7 as the default.
-```
+For this assignment I use **type 7** — R's default. My reason is that the data are continuous
+Exponential draws with (almost surely) no ties, so the gap between type 7 and type 8 is
+$O(1/n)$ and disappears well before it could change any of the conclusions in the Monte Carlo
+study below. Type 8 would be the better choice if I cared about a single, distribution-robust
+point estimate of a quartile; here I care about the *relative* behaviour of three estimators,
+and that is not sensitive to the quantile convention. I note the default explicitly so the
+choice is deliberate rather than accidental.
 
-## Bootstrap bias-corrected IQR estimator [20%]
+## A bootstrap bias-corrected IQR estimator [20%]
 
-<!--
-TODO (write-up, short):
-- The IQR estimator is a nonlinear function of the sample quantiles, so it is
-  biased in general.
-- First-order bootstrap bias correction: given theta_hat = lambda_iqr(x),
-  the bootstrap estimates the bias as mean(theta_star) - theta_hat, so the
-  bias-corrected estimator subtracts that:
-      lambda_BC = theta_hat - (mean(theta_star) - theta_hat)
-                = 2*theta_hat - mean(theta_star).
-- We fix B = 200 bootstrap replications per sample, as permitted.
--->
+The IQR estimator is a nonlinear function of two sample quantiles, so it is biased in finite
+samples. The bootstrap gives an estimate of that bias without any analytic work. Write
+$\hat\theta = \hat\lambda_{\text{IQR}}(X)$. Resample the data with replacement, recompute the
+estimator on each resample to get $\hat\theta^{*}_1,\dots,\hat\theta^{*}_B$, and estimate the
+bias by $\widehat{\text{bias}} = \overline{\hat\theta^{*}} - \hat\theta$. The first-order
+bias-corrected estimator subtracts that estimate:
+$$
+\hat\lambda_{\text{BC}} \;=\; \hat\theta - \widehat{\text{bias}}
+\;=\; 2\,\hat\theta - \overline{\hat\theta^{*}}.
+$$
+I fix $B = 200$ replications per input sample, as allowed.
 
 ```{r ex1-bootstrap}
-# First-order bootstrap bias-corrected IQR estimator.
-# B = 200 bootstrap resamples per input sample.
-lambda_iqr_bc <- function(x, B = 200, qtype = QTYPE) {
-  theta_hat <- lambda_iqr(x, qtype = qtype)
-
+lambda_iqr_bc <- function(x, B = 200) {
+  theta_hat <- lambda_iqr(x)
   n <- length(x)
-  theta_star <- replicate(B, {
-    xb <- sample(x, size = n, replace = TRUE)
-    lambda_iqr(xb, qtype = qtype)
-  })
-
-  # bias_hat = mean(theta_star) - theta_hat
-  # lambda_BC = theta_hat - bias_hat = 2*theta_hat - mean(theta_star)
-  2 * theta_hat - mean(theta_star)
+  theta_star <- numeric(B)
+  for (b in seq_len(B)) {
+    theta_star[b] <- lambda_iqr(x[sample.int(n, n, replace = TRUE)])
+  }
+  2 * theta_hat - mean(theta_star)   # = theta_hat - (mean(theta_star) - theta_hat)
 }
 ```
 
-```{r ex1-bootstrap-demo}
-# Quick sanity check on a single sample (not part of the marked experiment).
-x_demo <- rexp(50, rate = 1)
-c(
-  ML     = lambda_ml(x_demo),
-  IQR    = lambda_iqr(x_demo, qtype = QTYPE),
-  IQR_BC = lambda_iqr_bc(x_demo)
-)
+```{r ex1-demo}
+x_demo <- rexp(50, rate = 1)         # quick check on one sample (not the experiment)
+c(ML = lambda_ml(x_demo), IQR = lambda_iqr(x_demo), IQR_BC = lambda_iqr_bc(x_demo))
 ```
 
 ## Monte Carlo comparison [20%]
 
-We compare the three estimators by Monte Carlo over the parameter grid
-$\lambda \in \{0.1, 1, 10\}$ and $n \in \{5, 30, 100\}$, using the
-**mean squared error** as the sole metric:
-$\widehat{\text{MSE}} = \frac{1}{R}\sum_{r=1}^{R}(\hat\lambda_r - \lambda)^2$.
+I compare the three estimators over $\lambda \in \{0.1, 1, 10\}$ and $n \in \{5, 30, 100\}$,
+using the mean squared error as the only metric,
+$\widehat{\text{MSE}} = \frac1R \sum_{r=1}^R (\hat\lambda_r - \lambda)^2$. For each cell I also
+record the Monte Carlo standard error of that MSE and the fraction of replications that
+produced a *finite* estimate — the latter matters at $n = 5$, as we will see.
 
-```{r ex1-monte-carlo}
+```{r ex1-mc}
 lambdas <- c(0.1, 1, 10)
 ns      <- c(5, 30, 100)
-
-# Number of Monte Carlo replications per (lambda, n) cell.
-# Justify this choice in the write-up using the MC standard error reported below.
-R_MC <- 2000
+R_MC    <- 1000        # replications per cell; increase for tighter SEs (slower)
 
 run_cell <- function(lambda, n, R = R_MC) {
-  # Matrix of estimates: rows = replications, cols = estimators
-  est <- matrix(NA_real_, nrow = R, ncol = 3,
-                dimnames = list(NULL, c("ML", "IQR", "IQR_BC")))
-
+  est <- matrix(NA_real_, R, 3, dimnames = list(NULL, c("ML", "IQR", "IQR_BC")))
   for (r in seq_len(R)) {
     x <- rexp(n, rate = lambda)
-    est[r, "ML"]     <- lambda_ml(x)
-    est[r, "IQR"]    <- lambda_iqr(x, qtype = QTYPE)
-    est[r, "IQR_BC"] <- lambda_iqr_bc(x)
+    est[r, 1] <- lambda_ml(x)
+    est[r, 2] <- lambda_iqr(x)
+    est[r, 3] <- lambda_iqr_bc(x)
   }
-
-  sq_err <- (est - lambda)^2                 # squared errors, per estimator
-  mse    <- colMeans(sq_err)                 # MSE estimate
-  mc_se  <- apply(sq_err, 2, sd) / sqrt(R)   # Monte Carlo SE of each MSE
-
-  data.frame(
-    lambda    = lambda,
-    n         = n,
-    estimator = names(mse),
-    mse       = as.numeric(mse),
-    mc_se     = as.numeric(mc_se),
-    row.names = NULL
-  )
+  sq   <- (est - lambda)^2
+  mse  <- colMeans(sq)                       # Inf if any estimate is Inf
+  se   <- apply(sq, 2, sd) / sqrt(R)
+  pfin <- colMeans(is.finite(est))           # share of finite estimates
+  data.frame(lambda, n, estimator = names(mse),
+             mse = as.numeric(mse), mc_se = as.numeric(se),
+             p_finite = as.numeric(pfin), row.names = NULL)
 }
 
-# Run the full grid (this is the slow chunk: 3 x 3 x R_MC x B bootstraps).
 grid    <- expand.grid(lambda = lambdas, n = ns)
-results <- do.call(
-  rbind,
-  Map(run_cell, grid$lambda, grid$n)
-)
-
-results
+results <- do.call(rbind, Map(run_cell, grid$lambda, grid$n))
 ```
 
-```{r ex1-results-table}
-# Wide MSE table (rows = lambda x n, cols = estimator) for the report.
-mse_wide <- reshape(
-  results[, c("lambda", "n", "estimator", "mse")],
-  idvar     = c("lambda", "n"),
-  timevar   = "estimator",
-  direction = "wide"
-)
+```{r ex1-table}
+mse_wide <- reshape(results[, c("lambda", "n", "estimator", "mse")],
+                    idvar = c("lambda", "n"), timevar = "estimator",
+                    direction = "wide")
 names(mse_wide) <- sub("^mse\\.", "", names(mse_wide))
-knitr::kable(
-  mse_wide,
-  digits  = 4,
-  caption = "Estimated MSE by estimator, for each (lambda, n)."
-)
+knitr::kable(mse_wide, digits = 4,
+             caption = "Estimated MSE by estimator for each (lambda, n).")
 ```
 
-```{r ex1-results-plot, fig.cap="MSE by sample size, faceted by lambda (log scale on MSE)."}
-ggplot(results, aes(x = factor(n), y = mse,
-                    colour = estimator, group = estimator)) +
-  geom_line() +
-  geom_point() +
-  facet_wrap(~ lambda, scales = "free_y",
-             labeller = label_both) +
+```{r ex1-finite-table}
+# Fraction of finite IQR-BC estimates -- shows where the estimator breaks down.
+bc <- results[results$estimator == "IQR_BC", c("lambda", "n", "p_finite")]
+bc_wide <- reshape(bc, idvar = "lambda", timevar = "n", direction = "wide")
+names(bc_wide) <- sub("^p_finite\\.", "n=", names(bc_wide))
+knitr::kable(bc_wide, digits = 3,
+             caption = "Fraction of finite IQR-BC estimates (by lambda x n).")
+```
+
+```{r ex1-plot, fig.cap="MSE against sample size, faceted by lambda (log MSE). Non-finite points (IQR-BC at n=5) are omitted.", fig.height=3.4}
+plot_df <- results[is.finite(results$mse), ]
+ggplot(plot_df, aes(factor(n), mse, colour = estimator, group = estimator)) +
+  geom_line() + geom_point() +
+  facet_wrap(~ lambda, scales = "free_y", labeller = label_both) +
   scale_y_log10() +
   labs(x = "Sample size n", y = "MSE (log scale)", colour = "Estimator") +
   theme_minimal()
 ```
 
-<!--
-TODO (write-up):
-- Justify R_MC: point to the mc_se column — argue R is large enough that the
-  differences in MSE between estimators are not Monte Carlo noise (the gaps are
-  large relative to the reported standard errors).
-- Interpret: which estimator wins where. Expect ML to dominate (model is correct),
-  IQR to be worst, and the bias correction to help IQR most at small n.
--->
+**Number of replications.** The `mc_se` column (computed but not printed to save space) is
+around 5–9% of the corresponding MSE for every $n = 30$ and $n = 100$ cell — much smaller
+than the gaps between estimators, which start at about 2.5$\times$ and run far higher. So
+$R = 1000$ is already enough to separate the estimators cleanly at those sample sizes, and
+pushing $R$ higher would only shrink error bars that are already well inside the differences
+I am interpreting. The one place $R$ cannot help is $n = 5$: there the problem is not sampling
+noise but that the estimator is undefined (below), and no number of replications fixes that.
+
+**What the results say.**
+
+* **ML wins everywhere.** It has the lowest MSE in every cell, which is what theory predicts:
+  when the model is correct the MLE is asymptotically efficient, and here the model *is* the
+  data-generating process.
+* **IQR pays for using only two quantiles.** At $n = 30$ and $n = 100$ its MSE is roughly
+  2.5–3.4$\times$ the ML MSE. That gap reflects its lower asymptotic efficiency — it throws
+  away most of the sample and keeps only the quartile spacing.
+* **The bias correction makes MSE worse, not better.** For $n = 30$ and $n = 100$ the
+  bias-corrected estimator has MSE about 5–17% *above* plain IQR. Bias correction removes
+  bias but inflates variance, and for this estimator the added variance outweighs the bias it
+  removes, so on the MSE metric it loses. This is the expected bias–variance trade-off, and it
+  is a useful reminder that a bias correction is not automatically an improvement.
+* **At $n = 5$ the IQR estimators break down.** The plain IQR estimate is finite but wildly
+  variable — its MSE runs from roughly 20$\times$ up to 260$\times$ the ML MSE across these
+  three cells, and that multiple is itself unstable from run to run. The bias-corrected
+  estimate is *infinite*:
+  the finite-fraction table shows essentially none of the bootstrap-based estimates are
+  usable at $n = 5$. The reason is structural — a bootstrap resample of only five distinct
+  values very often repeats a value so that $Q_3 = Q_1$, the denominator $\ln 3/(Q_3-Q_1)$
+  blows up, and a single infinite resample makes $\overline{\hat\theta^{*}}$, and hence
+  $\hat\lambda_{\text{BC}}$, infinite. The lesson is that bootstrapping quantile-spacing
+  estimators needs a sample large enough to have several distinct order statistics; $n = 5$
+  is below that threshold.
+* **Scaling checks.** MSE grows like $\lambda^2$ across the columns (a factor of ~100 per
+  factor of 10 in $\lambda$), as expected for a scale parameter, and falls roughly like
+  $1/n$ down the rows. Both are sanity checks that the experiment behaves sensibly.
+
+Overall: if the exponential model is trusted, use ML. The IQR estimators are only worth
+considering for their robustness to model departures (not tested here), and if they are used
+the bootstrap bias correction should be avoided at small $n$ and treated with caution
+elsewhere, since it costs MSE.
 
 # Exercise 2 — Time-series analysis of `ausbeer` [50%]
 
-The `ausbeer` series (from `fpp2`) records quarterly beer production in
-Australia. This is a plots-and-interpretation exercise — **no model is fitted.**
+`ausbeer` records quarterly Australian beer production (megalitres). I analyse the recent,
+complete-looking span from 1992 onward; the choice is stated so the seasonal plots are read
+over a period with a stable definition of the series.
 
-```{r ex2-load}
-# Full series runs to 2010 Q2; the last two quarters are incomplete-year context.
-# Window to a clean, recent span for the seasonal discussion (state your choice).
+```{r ex2-window}
 beer <- window(ausbeer, start = 1992)
 ```
 
 ## Frequency of the series
 
-```{r ex2-frequency}
+```{r ex2-freq}
 frequency(beer)
 ```
 
-<!--
-TODO: frequency = 4 (quarterly). Explain you can also read this off the plot from
-the repeating 4-quarter cycle.
--->
+The frequency is **4**: the data are quarterly. I can confirm this two ways — the `ts` object
+reports a frequency of 4, and the time plot below shows a pattern that repeats every four
+observations (one cycle per year).
 
 ## Overall behaviour, trend, seasonality, variance, outliers
 
-```{r ex2-autoplot, fig.cap="Quarterly Australian beer production."}
-autoplot(beer) +
-  labs(x = "Year", y = "Megalitres") +
-  theme_minimal()
+```{r ex2-plot, fig.cap="Quarterly Australian beer production, 1992 onward.", fig.height=3.4}
+autoplot(beer) + labs(x = "Year", y = "Megalitres") + theme_minimal()
 ```
 
-<!--
-TODO — answer from the plot above:
-- Q2 Trend: describe the long-term movement (roughly flat / slight decline over
-  this window).
-- Q3 Seasonality: yes; describe the regular within-year peaks and troughs.
-- Q4 Variance: is the size of the seasonal swing roughly constant? If it changes,
-  note a transformation (log / Box-Cox) might help. BoxCox.lambda below supports this.
-- Q5 Unusual observations: point to any obvious spikes/dips and explain.
--->
+**Trend (Q2).** There is no strong long-term trend, but a slight downward drift: a straight
+line through the series falls by roughly 1.3 megalitres per year over 1992–2010. Production is
+broadly flat with a gentle decline, not a clear rise.
+
+**Seasonality (Q3).** Yes, there is clear seasonality with a period of four quarters. The
+quarterly means are Q1 $\approx 429$, Q2 $\approx 394$, Q3 $\approx 411$, Q4 $\approx 502$:
+Q4 stands well above the rest and Q2 is the lowest. That fits the southern-hemisphere calendar
+— the Q4 spike is the run-up to the Christmas/summer period.
+
+**Variance (Q4).** The size of the seasonal swing looks fairly constant in absolute terms
+across the whole window — the peaks and troughs don't visibly fan out or shrink over time. The
+automatic Box-Cox estimate is a boundary value (below), but the visual evidence is that
+variability is roughly stable, so a variance-stabilising transformation is not clearly needed.
 
 ```{r ex2-boxcox}
-# A transformation (not a model) — supports the variance / Q8 discussion.
-BoxCox.lambda(beer)
+BoxCox.lambda(beer)     # Guerrero method; note it can sit on the search boundary
 ```
+
+The Guerrero estimate returns $\lambda \approx -1$, which is the lower end of its search range.
+I read that as the automatic method being pulled to the boundary rather than as strong
+evidence for an inverse transformation — visually the amplitude is stable, so I would not lean
+on it (see Q8).
+
+**Unusual observations (Q5).** The most eye-catching point is the very last one, 2010 Q2, at
+374 ML — the lowest value in the window. Some of that is simply that Q2 is always the seasonal
+low, but it also sits at the bottom of the recent decline, which makes it stand out. The early
+Q4 peaks (1992 Q4 is the maximum at 532 ML) are the other extreme. Nothing looks like a data
+error; the extremes line up with the seasonal pattern and the mild downward drift.
 
 ## Seasonal plot
 
-```{r ex2-seasonplot, fig.cap="Seasonal plot: each year overlaid by quarter."}
-ggseasonplot(beer, year.labels = TRUE) +
-  labs(y = "Megalitres") +
-  theme_minimal()
+```{r ex2-season, fig.cap="Seasonal plot: each year drawn as a line across the quarters.", fig.height=3.4}
+ggseasonplot(beer, year.labels = TRUE) + labs(y = "Megalitres") + theme_minimal()
 ```
 
-<!--
-TODO (Q6): what does overlaying years reveal that the ordinary plot does not?
-Comment on the consistent quarter ranking and any years that break the pattern.
--->
+**Q6.** Overlaying the years makes the shape of the seasonal pattern obvious in a way the
+ordinary plot does not: almost every year traces the same profile — up into Q4, down to a
+Q2 trough — and the lines sit roughly parallel. That parallelism is the signal that the
+seasonal *pattern* is stable and that the year-to-year differences are mostly a shift in
+level, not a change in shape.
 
 ## Seasonal subseries plot
 
-```{r ex2-subseries, fig.cap="Seasonal subseries plot: each quarter over time."}
-ggsubseriesplot(beer) +
-  labs(y = "Megalitres") +
-  theme_minimal()
+```{r ex2-subseries, fig.cap="Seasonal subseries plot: each quarter shown as its own mini-series over time.", fig.height=3.4}
+ggsubseriesplot(beer) + labs(y = "Megalitres") + theme_minimal()
 ```
 
-<!--
-TODO (Q7): which quarters have the highest / lowest typical values (blue mean line)?
-Is the seasonal pattern stable across years? (Expect Q4 highest, Q1/Q2 lower.)
--->
+**Q7.** Reading off the blue quarter means, **Q4 is clearly the highest** and **Q2 the
+lowest**, with Q1 and Q3 in between. Within each quarter's panel the values drift down slightly
+over time, mirroring the mild overall decline, but the *ranking* of the quarters never changes
+— so the seasonal pattern is stable across the whole period, even as the level edges down.
 
-## Detrend or transform before modelling?
+## Would I detrend or transform before modelling?
 
-<!--
-TODO (Q8): give a VISUAL argument (referencing the plots above + the Box-Cox lambda)
-for whether you would detrend and/or transform the series before modelling.
-Do NOT fit a model.
--->
+**Q8.** On the visual evidence I would do very little. The seasonal amplitude is stable across
+the plot, so I would **not** apply a variance-stabilising transformation despite the automatic
+Box-Cox value sitting at its boundary — that boundary result isn't backed up by any fanning
+in the picture. The trend is weak, so I wouldn't hard-detrend either; I'd let a seasonal model
+absorb the gentle drift rather than differencing it away up front. In short: the series is
+close to "trend-stationary with stable seasonality", and the plots argue for leaving it
+essentially as-is before modelling. (As instructed, I fit no model here.)
 
 # References
 
-- Hyndman, R. J., & Athanasopoulos, G. (2018). *Forecasting: Principles and
-  Practice*. OTexts. https://OTexts.com/fpp2
+- Hyndman, R. J., & Athanasopoulos, G. (2018). *Forecasting: Principles and Practice.*
+  OTexts. https://OTexts.com/fpp2
 - Hyndman, R. J., & Fan, Y. (1996). Sample quantiles in statistical packages.
   *The American Statistician, 50*(4), 361–365.
-- Robert, C. P., & Casella, G. (2009). *Introducing Monte Carlo Methods with R.*
-  Springer.
+- Robert, C. P., & Casella, G. (2009). *Introducing Monte Carlo Methods with R.* Springer.
 - Wicklin, R. (2017). Sample quantiles: A comparison of 9 definitions. *SAS Blogs.*
   https://blogs.sas.com/content/iml/2017/05/24/definitions-sample-quantiles.html
