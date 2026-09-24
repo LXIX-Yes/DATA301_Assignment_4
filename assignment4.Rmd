@@ -246,7 +246,10 @@ elsewhere, since it costs MSE.
 
 # Exercise 2 — Time-series analysis of `ausbeer` [50%]
 
-`ausbeer` records quarterly Australian beer production (megalitres). I analyse the recent,
+`ausbeer` records quarterly Australian beer production (megalitres). Following the course
+announcement, I approach this as **exploratory data analysis**: the aim is to *extract the
+information contained in the data* through plots and summaries, not to fit any model. Every
+answer below is therefore a reading of what the data show. I analyse the recent,
 complete-looking span from 1992 onward; the choice is stated so the seasonal plots are read
 over a period with a stable definition of the series.
 
